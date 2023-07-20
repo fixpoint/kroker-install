@@ -1,10 +1,22 @@
 #!/bin/sh
-
 set -e
+
+usage() {
+  cat <<EOF
+$1: install kroker package
+
+Usage: $1 [-v VERSION] [-d DEST] [-y]
+  -v  Install VERSION Kroker instead
+  -d  Install Kroker to DEST (Default: $HOME/.kroker)
+  -y  Continue installation even the DEST is not empty
+
+EOF
+  exit 2
+}
 
 check_command() {
   if ! command -v $1 >/dev/null; then
-    echo "Error: $1 is required to install Kroker." 1>&2
+    echo "$1 is required to install Kroker." 1>&2
     exit 1
   fi
 }
@@ -15,7 +27,7 @@ find_arch() {
     x86_64) echo "amd64";;
     arm64 | aarch64) echo "arm64";;
     *)
-      echo "Error: $arch is not supported." 1>&2
+      echo "$arch is not supported." 1>&2
       exit 1;;
   esac
 }
@@ -35,45 +47,49 @@ check_command uname
 check_command tar
 check_command docker
 
-kroker_install="${KROKER_INSTALL:-$HOME/.kroker}"
-
-if [ -d "$kroker_install" ]; then
-  echo "KROKER_INSTALL ($kroker_install) directory already exists."
-  read -n1 -p "Do you want to overwrite it? [y/N]: " yn
-  case "$yn" in
-    [yY])
-      ;;
-    *)
-      echo "Cancel" 1>&2
-      exit 1
+# Parse flags
+kroker_overwrite=""
+kroker_version=""
+kroker_dest="$HOME/.kroker"
+while getopts "hyd:v:" arg; do
+  case "$arg" in
+    h) usage "$0";;
+    y) kroker_overwrite="1";;
+    d) kroker_dest="$OPTARG";;
+    v) kroker_version="$OPTARG";;
   esac
+done
+
+if [ "$kroker_overwrite" != "1" ] && [ -d "$kroker_dest" ] && [ "$(ls -A $kroker_dest)" != "" ]; then
+  echo "The destination directory ($kroker_dest) is not empty." 1>&2
+  echo "Use '$0 -d DEST' to change directory or '$0 -y' to allow overwrite." 1>&2
+  exit 1
 fi
-mkdir -p "${kroker_install}"
 
 # List download URLs
 download_urls=$(list_download_urls)
 
-if [ "$KROKER_VERSION" != "" ]; then
-  download_url=$(echo "$download_urls" | grep -e "$KROKER_VERSION" | head -1)
+if [ "$kroker_version" != "" ]; then
+  download_url=$(echo "$download_urls" | grep -e "$kroker_version" | head -1)
   if [ "$download_url" = "" ]; then
     # The specified KROKER_VERSION seems not correct
-    echo "Error: KROKER_VERSION ($KROKER_VERSION) is not valid version of Kroker" 1>&2
+    echo "Kroker version specified ($kroker_version) is not valid" 1>&2
     exit 1
   fi
 else
   download_url=$(echo "$download_urls" | head -1)
 fi
 
-curl --fail --location --progress-bar --output "${kroker_install}/tmp-kroker.tar.xz" "$download_url"
+curl --fail --location --progress-bar --output "$kroker_dest/tmp-kroker.tar.xz" "$download_url"
 
-tar xvf "${kroker_install}/tmp-kroker.tar.xz" -C "${kroker_install}" --strip-components 1
+tar xvf "$kroker_dest/tmp-kroker.tar.xz" -C "$kroker_dest" --strip-components 1
 
-docker load < "${kroker_install}/kroker.tar"
+docker load < "$kroker_dest/kroker.tar"
 
-rm "${kroker_install}/tmp-kroker.tar.xz"
+rm "$kroker_dest/tmp-kroker.tar.xz"
 
 echo "================================================================================"
-echo "Kroker was installed successfully to $kroker_install"
+echo "Kroker was installed successfully to $kroker_dest"
 echo "Register Kroker to Kompira by following command."
 echo
 echo "  docker compose run kroker setup"
